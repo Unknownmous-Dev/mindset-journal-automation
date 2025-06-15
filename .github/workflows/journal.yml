@@ -1,18 +1,22 @@
 name: Daily Mindset Journal
 on:
   schedule:
-    - cron: '0 8 * * *'  # 8AM UTC daily
-  workflow_dispatch:     # Manual trigger
+    - cron: '0 8 * * *'  # Runs daily at 8 AM UTC
+  workflow_dispatch:     # Allows manual triggering
+
 jobs:
   publish-journal:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    
     - uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+        
     - name: Install dependencies
       run: pip install requests fpdf
+      
     - name: Generate and publish journal
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -24,41 +28,37 @@ jobs:
         import datetime
         from fpdf import FPDF
         
-        # Secure API access
-        HF_TOKEN = os.environ['HF_TOKEN']
-        GUMROAD_TOKEN = os.environ['GUMROAD_TOKEN']
+        # Configuration
         DATE = datetime.datetime.now().strftime("%Y-%m-%d")
+        PDF_FILE = f"Daily_Mindset_Journal_{DATE}.pdf"
         
-        # Optimized prompt
-        PROMPT = f"""
-        Create a premium mindset journal for {DATE} with:
-        1. Powerful 5-word title
-        2. 3 motivational paragraphs
-        3. 5 affirmations
-        4. 1 inspirational quote with author
-        5. 3 reflection prompts
-        6. 5-item gratitude list
-        
-        Format in Markdown:
-        # [TITLE]
-        [BODY]
-        ## Affirmations
-        - ...
-        ## Quote
-        > ...
-        ## Reflection
-        1. ...
-        ## Gratitude
-        - ...
-        """
-        
-        # Call Hugging Face API
-        print("Calling Hugging Face API...")
-        response = requests.post(
+        # 1. Generate Journal Content
+        print("🚀 Generating journal content...")
+        hf_response = requests.post(
             "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1",
-            headers={"Authorization": f"Bearer {HF_TOKEN}"},
+            headers={"Authorization": f"Bearer {os.environ['HF_TOKEN']}"},
             json={
-                "inputs": PROMPT,
+                "inputs": f"""
+                Create a premium mindset journal for {DATE} with:
+                1. Powerful 5-word title
+                2. 3 motivational paragraphs
+                3. 5 affirmations
+                4. 1 inspirational quote with author
+                5. 3 reflection prompts
+                6. 5-item gratitude list
+                
+                Format in Markdown:
+                # [TITLE]
+                [BODY]
+                ## Affirmations
+                - ...
+                ## Quote
+                > ...
+                ## Reflection
+                1. ...
+                ## Gratitude
+                - ...
+                """,
                 "parameters": {
                     "max_new_tokens": 1200,
                     "temperature": 0.7,
@@ -67,24 +67,25 @@ jobs:
             }
         )
         
-        # Handle response
-        if response.status_code == 200:
-            journal_content = response.json()[0]['generated_text']
-            print("✅ Journal content generated!")
-        else:
-            print(f"❌ Hugging Face API error: {response.status_code}")
-            print(response.text)
-            raise Exception("Failed to generate journal content")
+        if hf_response.status_code != 200:
+            raise Exception(f"🤖 AI Error: {hf_response.text}")
+            
+        journal_content = hf_response.json()[0]['generated_text']
+        print("✅ Journal content generated!")
         
-        # Create PDF
-        print("Creating PDF...")
+        # 2. Create PDF
+        print("📄 Creating PDF...")
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
-        pdf.cell(200, 10, txt=f"Daily Mindset Journal - {DATE}", ln=True, align='C')
-        pdf.ln(10)
         
-        # Simple markdown parsing
+        # Header
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(200, 10, txt=f"Daily Mindset Journal - {DATE}", ln=True, align='C')
+        pdf.ln(15)
+        
+        # Content
+        pdf.set_font("Arial", size=12)
         for line in journal_content.split('\n'):
             if line.startswith("# "):
                 pdf.set_font("Arial", 'B', 20)
@@ -100,17 +101,16 @@ jobs:
                 pdf.multi_cell(0, 8, line)
             pdf.ln(3)
         
-        # Add footer
+        # Footer
         pdf.set_y(-15)
         pdf.set_font("Arial", 'I', 8)
         pdf.cell(0, 10, "Created by Unknownmous", align='C')
         
-        PDF_FILE = f"Daily_Mindset_Journal_{DATE}.pdf"
         pdf.output(PDF_FILE)
-        print(f"📄 PDF saved as {PDF_FILE}")
+        print(f"✅ PDF saved as {PDF_FILE}")
         
-        # Upload to Gumroad
-        print("Uploading to Gumroad...")
+        # 3. Upload to Gumroad
+        print("🛒 Uploading to Gumroad...")
         with open(PDF_FILE, "rb") as f:
             gumroad_response = requests.post(
                 "https://api.gumroad.com/v2/products",
@@ -118,21 +118,21 @@ jobs:
                 data={
                     "name": f"Daily Mindset Journal - {DATE}",
                     "description": "Premium mindset journal to elevate your thinking. Created by Unknownmous.",
-                    "published": "true"
+                    "published": "true",
+                    "make_discoverable": "true"
                 },
-                auth=(GUMROAD_TOKEN, '')
+                auth=(os.environ['GUMROAD_TOKEN'], '')
             )
         
-        # Robust response handling
-        try:
-            if gumroad_response.status_code == 200:
-                product_url = gumroad_response.json().get('product', {}).get('url', 'Unknown URL')
-                print(f"✅ Journal published at: {product_url}")
-            else:
-                print(f"⚠️ Gumroad upload failed: {gumroad_response.status_code}")
-                print(f"Response: {gumroad_response.text[:200]}")
-        except Exception as e:
-            print(f"❌ Error processing Gumroad response: {str(e)}")
-            print(f"Full response: {gumroad_response.text[:500]}")
+        # Debugging
+        print(f"Gumroad Status: {gumroad_response.status_code}")
+        print(f"Response: {gumroad_response.text[:200]}...")
+        
+        if gumroad_response.status_code == 200:
+            product_url = gumroad_response.json().get('product', {}).get('url', 'Unknown URL')
+            print(f"🎉 Success! Published at: {product_url}")
+        else:
+            raise Exception(f"❌ Gumroad upload failed: {gumroad_response.text}")
         EOF
+        
         python journal_automation.py
