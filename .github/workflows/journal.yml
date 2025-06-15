@@ -1,10 +1,33 @@
-cat << 'EOF' > journal_automation.py
-        import os, requests, datetime, json
+name: Daily Mindset Journal
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+jobs:
+  publish-journal:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    - name: Install dependencies
+      run: pip install requests fpdf
+    - name: Run journal automation
+      env:
+        TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+        GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
+      run: |
+        cat << 'EOF' > journal_automation.py
+        import os
+        import requests
+        import datetime
+        import json
         from fpdf import FPDF
         
-        # API Keys
-        TOGETHER_KEY = "${{ secrets.TOGETHER_API_KEY }}"
-        GUMROAD_TOKEN = "${{ secrets.GUMROAD_TOKEN }}"
+        # API Keys from environment
+        TOGETHER_KEY = os.environ.get('TOGETHER_API_KEY')
+        GUMROAD_TOKEN = os.environ.get('GUMROAD_TOKEN')
         
         # Generate Journal Content
         date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -51,7 +74,11 @@ cat << 'EOF' > journal_automation.py
             response = requests.post(
                 "https://api.gumroad.com/v2/products",
                 files={"file": f},
-                data={"name": f"Daily Mindset Journal - {date}", "description": "Premium mindset journal by Unknownmous", "published": "true"},
+                data={
+                    "name": f"Daily Mindset Journal - {date}",
+                    "description": "Premium mindset journal by Unknownmous",
+                    "published": "true"
+                },
                 auth=(GUMROAD_TOKEN, '')
             )
             print(f"Gumroad Response: {response.status_code} - {response.text}")
