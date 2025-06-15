@@ -1,0 +1,55 @@
+name: Daily Mindset Journal
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+jobs:
+  publish-journal:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    - run: pip install requests fpdf
+    - run: |
+        cat << 'EOF' > journal_automation.py
+        import os, requests, datetime
+        from fpdf import FPDF
+        
+        # API Keys
+        TOGETHER_KEY = "${{ secrets.TOGETHER_API_KEY }}"
+        GUMROAD_TOKEN = "${{ secrets.GUMROAD_TOKEN }}"
+        
+        # Generate Journal Content
+        date = datetime.datetime.now().strftime("%Y-%m-%d")
+        prompt = f"Create premium mindset journal for {date} with: 1. Powerful title 2. Motivational body 3. 5 affirmations 4. Inspirational quote 5. 3 reflection prompts 6. Gratitude section"
+        
+        response = requests.post(
+            "https://api.together.xyz/v1/chat/completions",
+            headers={"Authorization": f"Bearer {TOGETHER_KEY}"},
+            json={"model": "mistralai/Mixtral-8x7B-Instruct-v0.1", "messages": [{"role": "user", "content": prompt}], "max_tokens": 1500}
+        )
+        content = response.json()['choices'][0]['message']['content']
+        
+        # Create PDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt=f"Daily Mindset Journal - {date}", ln=True, align='C')
+        pdf.ln(10)
+        for line in content.split('\n'):
+            pdf.multi_cell(0, 8, txt=line)
+            pdf.ln(3)
+        pdf.output(f"journal_{date}.pdf")
+        
+        # Upload to Gumroad
+        with open(f"journal_{date}.pdf", "rb") as f:
+            requests.post(
+                "https://api.gumroad.com/v2/products",
+                files={"file": f},
+                data={"name": f"Daily Mindset Journal - {date}", "description": "Premium mindset journal by Unknownmous", "published": "true"},
+                auth=(GUMROAD_TOKEN, '')
+            )
+        EOF
+        python journal_automation.py
