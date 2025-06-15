@@ -53,6 +53,7 @@ jobs:
         """
         
         # Call Hugging Face API
+        print("Calling Hugging Face API...")
         response = requests.post(
             "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1",
             headers={"Authorization": f"Bearer {HF_TOKEN}"},
@@ -69,10 +70,14 @@ jobs:
         # Handle response
         if response.status_code == 200:
             journal_content = response.json()[0]['generated_text']
+            print("✅ Journal content generated!")
         else:
-            raise Exception(f"API Error: {response.text}")
+            print(f"❌ Hugging Face API error: {response.status_code}")
+            print(response.text)
+            raise Exception("Failed to generate journal content")
         
         # Create PDF
+        print("Creating PDF...")
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
@@ -102,12 +107,14 @@ jobs:
         
         PDF_FILE = f"Daily_Mindset_Journal_{DATE}.pdf"
         pdf.output(PDF_FILE)
+        print(f"📄 PDF saved as {PDF_FILE}")
         
         # Upload to Gumroad
+        print("Uploading to Gumroad...")
         with open(PDF_FILE, "rb") as f:
             gumroad_response = requests.post(
                 "https://api.gumroad.com/v2/products",
-                files={"file": f},
+                files={"file": (PDF_FILE, f)},
                 data={
                     "name": f"Daily Mindset Journal - {DATE}",
                     "description": "Premium mindset journal to elevate your thinking. Created by Unknownmous.",
@@ -116,6 +123,16 @@ jobs:
                 auth=(GUMROAD_TOKEN, '')
             )
         
-        print(f"✅ Journal published at: {gumroad_response.json().get('product', {}).get('url', 'Unknown URL')}")
+        # Robust response handling
+        try:
+            if gumroad_response.status_code == 200:
+                product_url = gumroad_response.json().get('product', {}).get('url', 'Unknown URL')
+                print(f"✅ Journal published at: {product_url}")
+            else:
+                print(f"⚠️ Gumroad upload failed: {gumroad_response.status_code}")
+                print(f"Response: {gumroad_response.text[:200]}")
+        except Exception as e:
+            print(f"❌ Error processing Gumroad response: {str(e)}")
+            print(f"Full response: {gumroad_response.text[:500]}")
         EOF
         python journal_automation.py
