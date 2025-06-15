@@ -1,8 +1,8 @@
 name: Daily Mindset Journal
 on:
   schedule:
-    - cron: '0 8 * * *'
-  workflow_dispatch:
+    - cron: '0 8 * * *'  # 8AM UTC daily
+  workflow_dispatch:     # Manual trigger
 jobs:
   publish-journal:
     runs-on: ubuntu-latest
@@ -13,74 +13,109 @@ jobs:
         python-version: '3.10'
     - name: Install dependencies
       run: pip install requests fpdf
-    - name: Run journal automation
+    - name: Generate and publish journal
       env:
-        TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
         GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
       run: |
         cat << 'EOF' > journal_automation.py
         import os
         import requests
         import datetime
-        import json
         from fpdf import FPDF
         
-        # API Keys from environment
-        TOGETHER_KEY = os.environ.get('TOGETHER_API_KEY')
-        GUMROAD_TOKEN = os.environ.get('GUMROAD_TOKEN')
+        # Secure API access
+        HF_TOKEN = os.environ['HF_TOKEN']
+        GUMROAD_TOKEN = os.environ['GUMROAD_TOKEN']
+        DATE = datetime.datetime.now().strftime("%Y-%m-%d")
         
-        # Generate Journal Content
-        date = datetime.datetime.now().strftime("%Y-%m-%d")
-        prompt = "Create premium mindset journal for today with: 1. Powerful title 2. Motivational body 3. 5 affirmations 4. Inspirational quote 5. 3 reflection prompts 6. Gratitude section"
+        # Optimized prompt
+        PROMPT = f"""
+        Create a premium mindset journal for {DATE} with:
+        1. Powerful 5-word title
+        2. 3 motivational paragraphs
+        3. 5 affirmations
+        4. 1 inspirational quote with author
+        5. 3 reflection prompts
+        6. 5-item gratitude list
         
-        # Debugging: Print API key status
-        print(f"Using Together API key: {TOGETHER_KEY[:5]}...{TOGETHER_KEY[-5:]}")
+        Format in Markdown:
+        # [TITLE]
+        [BODY]
+        ## Affirmations
+        - ...
+        ## Quote
+        > ...
+        ## Reflection
+        1. ...
+        ## Gratitude
+        - ...
+        """
         
+        # Call Hugging Face API
         response = requests.post(
-            "https://api.together.xyz/v1/chat/completions",
-            headers={"Authorization": f"Bearer {TOGETHER_KEY}"},
+            "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1",
+            headers={"Authorization": f"Bearer {HF_TOKEN}"},
             json={
-                "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 1500,
-                "temperature": 0.7
+                "inputs": PROMPT,
+                "parameters": {
+                    "max_new_tokens": 1200,
+                    "temperature": 0.7,
+                    "return_full_text": False
+                }
             }
         )
         
-        # Debugging: Print full response
-        print(f"API Response Status: {response.status_code}")
-        print(f"API Response Body: {response.text[:200]}...")
-        
-        # Handle response safely
-        data = response.json()
-        if 'choices' not in data:
-            raise Exception(f"API Error: {data.get('error', {}).get('message', 'Unknown error')}")
-            
-        content = data['choices'][0]['message']['content']
+        # Handle response
+        if response.status_code == 200:
+            journal_content = response.json()[0]['generated_text']
+        else:
+            raise Exception(f"API Error: {response.text}")
         
         # Create PDF
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
-        pdf.cell(200, 10, txt=f"Daily Mindset Journal - {date}", ln=True, align='C')
+        pdf.cell(200, 10, txt=f"Daily Mindset Journal - {DATE}", ln=True, align='C')
         pdf.ln(10)
-        for line in content.split('\n'):
-            pdf.multi_cell(0, 8, txt=line)
+        
+        # Simple markdown parsing
+        for line in journal_content.split('\n'):
+            if line.startswith("# "):
+                pdf.set_font("Arial", 'B', 20)
+                pdf.cell(0, 10, line[2:], ln=True)
+            elif line.startswith("## "):
+                pdf.set_font("Arial", 'B', 16)
+                pdf.cell(0, 10, line[3:], ln=True)
+            elif line.startswith(">"):
+                pdf.set_font("Arial", 'I', 12)
+                pdf.multi_cell(0, 8, line[1:].strip())
+            else:
+                pdf.set_font("Arial", size=12)
+                pdf.multi_cell(0, 8, line)
             pdf.ln(3)
-        pdf.output(f"journal_{date}.pdf")
+        
+        # Add footer
+        pdf.set_y(-15)
+        pdf.set_font("Arial", 'I', 8)
+        pdf.cell(0, 10, "Created by Unknownmous", align='C')
+        
+        PDF_FILE = f"Daily_Mindset_Journal_{DATE}.pdf"
+        pdf.output(PDF_FILE)
         
         # Upload to Gumroad
-        with open(f"journal_{date}.pdf", "rb") as f:
-            response = requests.post(
+        with open(PDF_FILE, "rb") as f:
+            gumroad_response = requests.post(
                 "https://api.gumroad.com/v2/products",
                 files={"file": f},
                 data={
-                    "name": f"Daily Mindset Journal - {date}",
-                    "description": "Premium mindset journal by Unknownmous",
+                    "name": f"Daily Mindset Journal - {DATE}",
+                    "description": "Premium mindset journal to elevate your thinking. Created by Unknownmous.",
                     "published": "true"
                 },
                 auth=(GUMROAD_TOKEN, '')
             )
-            print(f"Gumroad Response: {response.status_code} - {response.text}")
+        
+        print(f"✅ Journal published at: {gumroad_response.json().get('product', {}).get('url', 'Unknown URL')}")
         EOF
         python journal_automation.py
