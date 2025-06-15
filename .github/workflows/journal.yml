@@ -1,5 +1,4 @@
- run: |
-        cat << 'EOF' > journal_automation.py
+cat << 'EOF' > journal_automation.py
         import os, requests, datetime, json
         from fpdf import FPDF
         
